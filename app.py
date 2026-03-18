@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import sqlite3
 import pandas as pd
@@ -27,6 +27,10 @@ except FileNotFoundError:
 
 
 # --- 3. API Endpoints ---
+@app.route('/')
+def serve_dashboard():
+    return send_file(PROJECT_DIR / 'index.html')
+
 @app.route('/api/diagnose', methods=['POST'])
 def diagnose_patient():
     data = request.json
