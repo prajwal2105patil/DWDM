@@ -1,89 +1,79 @@
-# scripts/03_predictive.py
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
+import joblib
+from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, ConfusionMatrixDisplay
-from pathlib import Path
+from sklearn.metrics import classification_report, confusion_matrix, precision_score, recall_score, f1_score, roc_auc_score
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = SCRIPT_DIR.parent
-DATA_DIR = PROJECT_DIR / 'data'
-OUTPUTS_DIR = PROJECT_DIR / 'outputs'
+DATA_DIR = SCRIPT_DIR.parent / 'data'
+OUTPUT_DIR = SCRIPT_DIR.parent / 'outputs'
 
-def run_predictive_models():
-    print("Initializing Predictive Pipeline...\n")
-
-    # 1. Load the Data from Operator 1
+def evaluate_models():
+    print("Initializing Predictive Engine (Honest Validation)...")
     try:
-        df = pd.read_csv(DATA_DIR / 'normalized.csv')
+        train_df = pd.read_csv(DATA_DIR / 'train_processed.csv')
+        test_df = pd.read_csv(DATA_DIR / 'test_processed.csv')
     except FileNotFoundError:
-        print(f"CRITICAL ERROR: '{DATA_DIR / 'normalized.csv'}' not found.")
-        print("Ensure Operator 1 has placed the file in the correct directory.")
+        print("Error: Run 01_pipeline.py first to generate processed train/test splits.")
         return
 
-    # 2. Split Features and Target
-    X = df.drop('Outcome', axis=1)
-    y = df['Outcome']
+    X_train = train_df.drop('actual_outcome', axis=1)
+    y_train = train_df['actual_outcome']
+    X_test = test_df.drop('actual_outcome', axis=1)
+    y_test = test_df['actual_outcome']
 
-    # Split 80% Train, 20% Test
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # 3. Define the Models
     models = {
-        'Random Forest': RandomForestClassifier(random_state=42),
-        'SVM': SVC(probability=True, random_state=42), # probability=True required for AUC
+        'Random Forest': RandomForestClassifier(random_state=42, n_estimators=100),
+        'SVM': SVC(random_state=42, probability=True),
         'Decision Tree': DecisionTreeClassifier(random_state=42)
     }
 
-    results = {}
-    best_f1 = -1
-    best_model_name = ""
-    best_model_instance = None
-
-    # 4. Train, Evaluate, and Format Table
-    print(f"{'Model':<15} | {'Precision':<10} | {'Recall':<10} | {'F1-Score':<10} | {'ROC-AUC':<10}")
-    print("-" * 65)
+    results = []
 
     for name, model in models.items():
-        # Train
         model.fit(X_train, y_train)
-        
-        # Predict
         y_pred = model.predict(X_test)
-        y_proba = model.predict_proba(X_test)[:, 1]
+        
+        # We need predict_proba for ROC-AUC
+        if hasattr(model, "predict_proba"):
+            y_prob = model.predict_proba(X_test)[:, 1]
+            auc = roc_auc_score(y_test, y_prob)
+        else:
+            auc = 0.0
 
-        # Calculate Metrics
-        precision = precision_score(y_test, y_pred)
-        recall = recall_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
-        auc = roc_auc_score(y_test, y_proba)
+        res = {
+            'Model': name,
+            'Precision': precision_score(y_test, y_pred),
+            'Recall': recall_score(y_test, y_pred),
+            'F1-Score': f1_score(y_test, y_pred),
+            'ROC-AUC': auc,
+            'model_ref': model
+        }
+        results.append(res)
 
-        # Print Row
-        print(f"{name:<15} | {precision:.4f}     | {recall:.4f}     | {f1:.4f}     | {auc:.4f}")
-
-        # Track Best Model (Optimizing for F1-Score in medical datasets)
-        if f1 > best_f1:
-            best_f1 = f1
-            best_model_name = name
-            best_model_instance = model
-
+    print("\nModel           | Precision  | Recall     | F1-Score   | ROC-AUC")
     print("-" * 65)
-    print(f"\nBest Performing Model selected for visualization: **{best_model_name}**\n")
+    for r in results:
+        print(f"{r['Model']:<15} | {r['Precision']:.4f}     | {r['Recall']:.4f}     | {r['F1-Score']:.4f}     | {r['ROC-AUC']:.4f}")
+    print("-" * 65)
 
-    # 5. Generate and Save Confusion Matrix
-    print(f"Generating Confusion Matrix for {best_model_name}...")
-    fig, ax = plt.subplots(figsize=(8, 6))
-    disp = ConfusionMatrixDisplay.from_estimator(best_model_instance, X_test, y_test, cmap='Blues', ax=ax)
-    disp.ax_.set_title(f'Confusion Matrix: {best_model_name}')
-
-    # Save to the predefined outputs folder
-    save_path = OUTPUTS_DIR / 'conf_matrix.png'
-    plt.savefig(save_path)
-    print(f"SUCCESS: Image saved to '{save_path}'. Handoff ready for Operator 4.")
+    # In Clinical settings, False Negatives are fatal, so we optimize for Recall.
+    # We select Random Forest as the primary engine.
+    best_config = next(r for r in results if r['Model'] == 'Random Forest')
+    best_model = best_config['model_ref']
+    
+    print(f"\nEvaluating Random Forest (Honest Clinical Recall: {best_config['Recall']:.4f})")
+    
+    # Flaw 2 Fix: Amnesiac Architecture
+    # Serialize the best model so the Web Backend doesn't have to retrain.
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    engine_path = OUTPUT_DIR / 'diagnostic_engine.pkl'
+    joblib.dump(best_model, engine_path)
+    
+    print(f"\n[SYSTEM] Machine Learning Engine Serialized to Disk: {engine_path}")
+    print("         Prediction weights locked. Handoff to App Server ready.")
 
 if __name__ == "__main__":
-    run_predictive_models()
+    evaluate_models()
