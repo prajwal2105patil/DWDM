@@ -7,15 +7,21 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, ConfusionMatrixDisplay
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = SCRIPT_DIR.parent
+DATA_DIR = PROJECT_DIR / 'data'
+OUTPUTS_DIR = PROJECT_DIR / 'outputs'
 
 def run_predictive_models():
     print("Initializing Predictive Pipeline...\n")
 
     # 1. Load the Data from Operator 1
     try:
-        df = pd.read_csv('../data/normalized.csv')
+        df = pd.read_csv(DATA_DIR / 'normalized.csv')
     except FileNotFoundError:
-        print("CRITICAL ERROR: '../data/normalized.csv' not found.")
+        print(f"CRITICAL ERROR: '{DATA_DIR / 'normalized.csv'}' not found.")
         print("Ensure Operator 1 has placed the file in the correct directory.")
         return
 
@@ -75,8 +81,9 @@ def run_predictive_models():
     disp.ax_.set_title(f'Confusion Matrix: {best_model_name}')
 
     # Save to the predefined outputs folder
-    plt.savefig('../outputs/conf_matrix.png')
-    print("SUCCESS: Image saved to '../outputs/conf_matrix.png'. Handoff ready for Operator 4.")
+    save_path = OUTPUTS_DIR / 'conf_matrix.png'
+    plt.savefig(save_path)
+    print(f"SUCCESS: Image saved to '{save_path}'. Handoff ready for Operator 4.")
 
 if __name__ == "__main__":
     run_predictive_models()
